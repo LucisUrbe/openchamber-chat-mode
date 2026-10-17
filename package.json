@@ -1,0 +1,26 @@
+{
+  "name": "openchamber-chat-mode",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Location-scoped Chat mode for OpenChamber 2.4.0 and OpenCode 2.0.32",
+  "scripts": {
+    "check": "npm run build && npm run typecheck && npm test && npm run test:integration",
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "test:integration": "node scripts/integration.mjs",
+    "deploy": "node scripts/deploy.mjs"
+  },
+  "dependencies": {
+    "@opencode/plugin": "2.0.32",
+    "@openchamber/sdk": "2.4.0",
+    "decimal.js": "10.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "esbuild": "0.25.12",
+    "typescript": "6.0.3"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "openchamber-chat-mode",
+  "version": "0.1.0",
+  "private": true,
+  "description": "聊天模式：使用独立项目的原生会话、联网检索与精确计算",
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "chat-mode",
+        "name": "聊天模式",
+        "icon": "chat-3",
+        "entry": "panel/index.html"
+      },
+      "capabilities": [
+        "sessions"
+      ]
+    },
+    "engines": {
+      "openchamber": "2.4.0"
+    }
+  }
+}

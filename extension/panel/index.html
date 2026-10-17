@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>聊天模式</title>
+<style>body{margin:0;padding:20px;font-family:system-ui,sans-serif;color:var(--oc-fg);background:var(--oc-bg)}h1{font-size:20px;margin:0 0 8px}p{line-height:1.65;font-size:13px}section{margin:20px 0}label{font-size:13px}select{width:100%;padding:8px;margin-top:8px;background:transparent;color:inherit;border:1px solid #8886;border-radius:6px}#status{font-weight:600}#error{color:#c75d45;white-space:pre-wrap}small{opacity:.7;line-height:1.6}.actions{display:flex;gap:8px}</style>
+</head><body>
+<h1>聊天模式</h1><p>问答 · 联网检索 · 精确计算</p>
+<section><label for="project">独立聊天项目</label><select id="project"><option value="">请选择已部署的聊天项目</option></select><p id="status" role="status">正在连接 OpenChamber…</p><small>此面板只显示项目与 Agent 状态。权限由聊天项目的服务端配置决定。</small></section>
+<section><div class="actions"><span id="refresh"></span></div><p>新建聊天：切换至此项目，使用 OpenChamber 原生“新建会话”，确认 Agent 为 <b>Chat</b> 后发送消息。</p><small>可选择模型、上传图片或文字附件。图片理解需要视觉模型；搜索需要可用的搜索供应商。没有文件读写、Shell、代码执行或子 Agent 工具。</small></section>
+<p id="error" role="alert"></p><section><h2 style="font-size:15px">聊天历史</h2><div id="history"></div></section>
+<script src="main.js"></script></body></html>

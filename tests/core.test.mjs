@@ -26,6 +26,7 @@ test('new tools are hidden by default; policy and agent allowlists agree', () =>
 test('extension requests sessions only and matches the installed SDK', async () => {
   const manifest=JSON.parse(await readFile('dist/extension/package.json','utf8'));
   assert.deepEqual(manifest.openchamber.contributes.capabilities,['sessions']);
+  assert.equal(manifest.openchamber.engines.openchamber,'2.0.0');
   const parsed=parseManifest(manifest);
   assert.equal(parsed.ok,true,JSON.stringify(parsed));
 });

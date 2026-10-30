@@ -2,13 +2,13 @@
 // OpenAI-compatible fixture. No account credentials or real LLM calls are used.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { randomBytes } from 'node:crypto';
 import { mkdtemp, mkdir, cp, writeFile, readFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { chatConfig, allowedTools, versions } from '../dist/lib/policy.js';
+import { chatConfig, allowedTools, versions, supportedMajors, supportsMajorVersion } from '../dist/lib/policy.js';
 
 const binary = process.env.OPENCODE_TEST_BINARY ?? '/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode';
 const root = await mkdtemp(join(tmpdir(), 'openchamber-chat-test-'));
@@ -33,10 +33,20 @@ const model = {
   model: 'chat-test/fixture',
   providers: { 'chat-test': { name: 'Local fixture', package: '@opencode/ai/providers/openai-compatible', settings: { baseURL: `http://127.0.0.1:${fixture.address().port}/v1`, apiKey: 'local-fixture-only' }, models: { fixture: { name: 'Fixture', limit: { context: 32000, output: 2048 }, capabilities: { tools: true, input: ['text', 'image'], output: ['text'] } } } } },
 };
-await writeFile(join(chat, 'opencode.jsonc'), JSON.stringify({ ...chatConfig(), ...model }));
+// Optionally test a real installation's JSON configuration without writing to it.
+const testChatConfig = process.env.OPENCODE_TEST_CHAT_CONFIG
+  ? JSON.parse(await readFile(process.env.OPENCODE_TEST_CHAT_CONFIG, 'utf8'))
+  : chatConfig();
+await writeFile(join(chat, 'opencode.jsonc'), JSON.stringify({ ...testChatConfig, ...model }));
 await writeFile(join(coding, 'opencode.jsonc'), JSON.stringify(model));
 const password = randomBytes(24).toString('hex');
 const env = { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, XDG_DATA_HOME: join(root,'data'), XDG_CONFIG_HOME: join(root,'config'), XDG_CACHE_HOME: join(root,'cache'), XDG_STATE_HOME: join(root,'state'), OPENCODE_SERVER_PASSWORD: password };
+const binaryVersionOutput = execFileSync(binary, ['--version'], { cwd: root, env, encoding: 'utf8' }).trim();
+const binaryVersion = binaryVersionOutput.match(/^opencode v(\S+)$/)?.[1];
+assert.ok(supportsMajorVersion(binaryVersion, supportedMajors.opencode), `Unsupported or unrecognized OpenCode version: ${binaryVersionOutput}`);
+let appVersion;
+try { appVersion = execFileSync('/usr/libexec/PlistBuddy', ['-c','Print :CFBundleShortVersionString','/Applications/OpenChamber.app/Contents/Info.plist'], { encoding:'utf8', stdio:['ignore','pipe','ignore'] }).trim(); }
+catch { appVersion = undefined; }
 const child = spawn(binary, ['serve', '--hostname', '127.0.0.1', '--port', '0'], { cwd: root, env, stdio: ['ignore','pipe','pipe'] });
 let logs = ''; child.stdout.on('data', b => { logs += b; }); child.stderr.on('data', b => { logs += b; });
 const delay = ms => new Promise(r => setTimeout(r,ms));
@@ -58,19 +68,30 @@ async function prompt(id, text, files) {
   }
   return requests.slice(count);
 }
+function lastToolResponse(captured) {
+  const messages = captured.flatMap(request => request.messages.filter(message => message.role === 'tool'));
+  assert.ok(messages.length, 'tool response reaches the model');
+  return JSON.parse(messages.at(-1).content);
+}
 try {
   for (let i=0;i<200;i++) { base = logs.match(/server listening on (http:\/\/[^\s]+)/)?.[1]; if (base) break; if (child.exitCode !== null) throw new Error('OpenCode exited'); await delay(50); }
   assert.ok(base, 'server started');
-  let plugins;
+  let plugins, agents;
   for (let i=0;i<100;i++) {
     plugins = await api(scoped('/api/plugin', chat));
     const plugin = plugins.data.find(p => p.id === 'openchamber-chat-mode');
-    if (plugin?.state.status === 'active' || plugin?.state.status === 'failed') break;
+    const watchdog = plugins.data.find(p => p.id === 'openchamber-chat-watchdog');
+    if (plugin?.state.status === 'failed' || watchdog?.state.status === 'failed') break;
+    if (plugin?.state.status === 'active' && watchdog?.state.status === 'active') {
+      agents = await api(scoped('/api/agent', chat));
+      if (agents.data.find(a => a.id === 'chat')?.name === 'Chat') break;
+    }
     await delay(100);
   }
   await writeFile(join(root,'plugins.json'),JSON.stringify(plugins,null,2));
   assert.equal(plugins.data.find(p => p.id === 'openchamber-chat-mode')?.state.status, 'active');
-  const agents = await api(scoped('/api/agent', chat));
+  assert.equal(plugins.data.find(p => p.id === 'openchamber-chat-watchdog')?.state.status, 'active');
+  agents ??= await api(scoped('/api/agent', chat));
   assert.ok(agents.data.some(a => a.id === 'chat'));
   assert.equal(agents.data.find(a => a.id === 'chat').name, 'Chat');
   const session = (await api('/api/session', { location: { directory: chat }, title: 'Chat integration' })).data;
@@ -92,11 +113,27 @@ try {
     const primary = captured.find(r => r.tools?.length);
     assert.ok(primary, 'primary request with tools');
     assert.deepEqual(primary.tools.map(t => t.function.name).sort(), [...allowedTools].sort());
+    const schema = primary.tools.find(t => t.function.name === 'chat_calculate').function.parameters;
+    assert.ok(schema.properties.operation.enum.includes('expression'));
+    assert.ok(schema.properties.operation.enum.includes('sample_variance'));
+    assert.ok(schema.properties.operation.enum.includes('matrix_multiply'));
+    assert.ok(schema.properties.operation.enum.includes('bigint'));
   }
   replyTool = { name: 'chat_calculate', args: { operation: 'add', a: '0.1', b: '0.2' } };
   const arithmetic = await prompt(session.id, 'Calculate 0.1 plus 0.2.');
-  assert.ok(arithmetic.some(r => r.messages.some(m => m.role === 'tool' && String(m.content).includes('0.3'))), 'real calculator result returns to model');
+  assert.equal(lastToolResponse(arithmetic).result, '0.3', 'real calculator result returns to model');
   await api(`/api/session/${session.id}/agent`, { agent:'chat' });
+  for (const [args, expected] of [
+    [{ operation:'expression', expression:'1250*(12.5/100)+2^3' }, '164.25'],
+    [{ operation:'weighted_mean', values:['80','90'], weights:['0.25','0.75'] }, '87.5'],
+    [{ operation:'sample_variance', values:['1','3'] }, '2'],
+    [{ operation:'matrix_multiply', matrix:[['1','2']], rightMatrix:[['3'],['4']] }, [['11']]],
+    [{ operation:'bigint', left:'9007199254740993', right:'2', operator:'+' }, '9007199254740995'],
+  ]) {
+    replyTool = { name:'chat_calculate', args };
+    const captured = await prompt(session.id, `Exercise calculator operation ${args.operation}.`);
+    assert.deepEqual(lastToolResponse(captured).result, expected, `${args.operation} result returns to model`);
+  }
   const attachment = await prompt(session.id, 'Read only my explicit attachment.', [{ uri:'data:text/plain;base64,' + Buffer.from('explicit attachment marker 42817').toString('base64'), name:'input.txt' }]);
   assert.ok(attachment.some(r=>JSON.stringify(r.messages).includes('explicit attachment marker 42817')), 'text attachment reaches model without read permission');
   const image = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==';
@@ -117,7 +154,14 @@ try {
   assert.equal(permitted.data.effect,'allow');
   const control = await prompt(other.id, 'Say hello.');
   assert.ok(control.some(r => r.tools?.some(t => !allowedTools.includes(t.function.name))), 'coding tools unaffected');
-  const report = { passed: true, versions, checks: ['local plugin active', 'configured default Chat agent', 'Chat and Build negative permissions', 'native web permissions', 'captured model tool allowlist for Chat and Build', 'actual decimal tool execution', 'explicit text and image attachments', 'forced unadvertised shell call rejected; sentinel unchanged', 'ordinary coding location unaffected'], realLLM: false, externalSearch: false };
+  const report = {
+    passed: true,
+    versions: {
+      opencode: { actual:binaryVersion, baseline:versions.opencode, matchesBaseline:binaryVersion === versions.opencode },
+      openchamber: { installed:appVersion ?? null, baseline:versions.openchamber, matchesBaseline:appVersion === versions.openchamber },
+    },
+    checks: ['local plugin active', 'configured default Chat agent and display name', 'Chat and Build negative permissions', 'native web permissions', 'captured model tool allowlist and calculator schema for Chat and Build', 'actual arithmetic, expression, statistics, matrix and bigint tool execution', 'explicit text and image attachments', 'forced unadvertised shell call rejected; sentinel unchanged', 'ordinary coding location unaffected'], realLLM: false, externalSearch: false,
+  };
   await mkdir('.local/validation', { recursive:true });
   await writeFile('.local/validation/integration.json', JSON.stringify(report,null,2)+'\n');
   console.log(JSON.stringify(report,null,2));

@@ -17,7 +17,7 @@
       ]
     },
     "engines": {
-      "openchamber": "2.4.0"
+      "openchamber": "2.0.0"
     }
   }
 }

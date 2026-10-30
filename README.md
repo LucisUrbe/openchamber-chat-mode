@@ -2,13 +2,13 @@
 
 English | [中文](README.zh.md)
 
-A dedicated conversational project for **OpenChamber 2.4.0 / OpenCode 2.0.32** on macOS. The agent displays as **Chat**; its stable configuration/session ID is `chat`.
+A dedicated conversational project for **OpenChamber/OpenCode 2.x** on macOS. The recorded compatibility run used OpenChamber **2.5.3** with bundled OpenCode **2.2.0**; other 2.x versions pass the major-version gate but have not been validated. The agent displays as **Chat**; its stable configuration/session ID is `chat`.
 
 Keeps native conversations, model selection, explicit attachments and history. Model-visible tools are exactly `websearch`, `webfetch`, `question` and `chat_calculate`. No general local files, shell, code execution, browser automation, skills or subagents.
 
 ## Build and install
 
-Requires Node.js 22+, npm, and `/Applications/OpenChamber.app` 2.4.0 with bundled OpenCode 2.0.32. SDKs and libraries are pinned in the lockfile.
+Requires Node.js 22+, npm, and an OpenChamber 2.x installation with bundled OpenCode 2.x. SDKs and libraries are pinned in the lockfile. The validation record identifies the exact app and server versions exercised.
 
 ```sh
 npm ci --ignore-scripts
@@ -16,13 +16,14 @@ npm run check
 npm run deploy
 ```
 
-`check` builds, checks types and runs unit tests plus the **installed OpenCode binary** against isolated XDG storage and a local model fixture. No paid model calls. `OPENCODE_TEST_BINARY` can explicitly override the test binary; it does not expand the supported version range.
+`check` builds, checks types and runs unit tests plus the **installed OpenCode binary** against isolated XDG storage and local model fixtures, including the watchdog lifecycle check. No paid model calls. `OPENCODE_TEST_BINARY` can explicitly override the test binary; it does not expand the supported version range.
 
 Deployment creates only `~/.local/share/openchamber-chat/`:
 
 ```text
 location/opencode.jsonc
 location/.opencode/plugins/chat/{package.json,index.js}
+location/.opencode/plugins/chat-watch.js
 extension/package.json
 extension/panel/{index.html,main.js}
 .chat-mode-install.json
@@ -41,8 +42,9 @@ The official UI-kit panel subscribes to native history and uses `host.openSessio
 ## Boundary and features
 
 - Agent permissions deny everything, then allow four actions. Independent location `tool.use` policies deny other actions even when Build or broad session permissions are selected.
-- The local plugin makes allowed tools directly callable (`codemode: false`) and strips other tool definitions before model requests. It sets **Chat** as the display name without changing the ID.
-- `chat_calculate`: two decimal strings (up to 256 characters each), add/subtract/multiply/divide, decimal.js, 50 significant digits, half-even rounding. Execution calls `ctx.permission.assert`. Division by zero, nonfinite values and code are rejected; there is no expression evaluator.
+- The local core plugin makes allowed tools directly callable (`codemode: false`) and strips other tool definitions before model requests. The watcher sets **Chat** as the display name without changing the ID.
+- A separate server-side watcher at `location/.opencode/plugins/chat-watch.js` warns in the Chat Location when the core Chat plugin explicitly fails to load, remains missing, or its status cannot be confirmed. It prefixes each visible primary/all Agent display name with a prominent warning and removes the warning after the core plugin recovers. It does not add permissions to the extension.
+- `chat_calculate` supports decimal arithmetic, restricted numeric expressions (including powers and the remainder operator), square roots, aggregate and sample/population statistics, weighted means, vector dot products, matrix multiplication, and exact integer operations. Percentage calculations can be expressed with ordinary arithmetic. Decimal inputs can use scientific notation; results use 50 significant digits by default, or a requested precision from 1 to 256, with half-even rounding. Integer division truncates toward zero. The tool checks permissions, limits input and work sizes, and rejects code, invalid or out-of-bounds numbers, and division by zero.
 - Explicit text and image attachments use native input, separately from `read` permissions. Vision requires a suitable model. General PDF extraction, image generation and persistent memory are not implemented.
 - Web search uses native providers. `random` selects a provider; it does not aggregate independent searches. Configure providers through native settings when needed.
 
@@ -50,14 +52,20 @@ This is **model/tool isolation, not an OS sandbox**. OpenCode still reads config
 
 ## Validation
 
-See [VALIDATION.md](docs/VALIDATION.md). The installed binary passed outbound-tool, permission, calculator, attachment-transport, forced-shell-rejection and coding-isolation checks. Actual Desktop validation used `opencode-go/deepseek-v4.1-flash` at `high` for calculation, URL fetch and search; Chat, the project and native history were visible. Image transport was tested with a fixture, not a live vision model. Private captures are ignored under `.local/`.
+See [VALIDATION.md](docs/VALIDATION.md) for version-specific evidence and pending checks. Integration uses an isolated OpenCode server and a local model fixture; actual account-backed and Desktop results are identified separately. Image transport was tested with a fixture, not a live vision model. Private captures are ignored under `.local/`.
+
+The version gate accepts valid semantic versions on major version 2, including prerelease and build metadata, and rejects malformed versions or other majors. The extension manifest's `engines.openchamber: 2.0.0` is a minimum-version declaration; by itself it does not prevent the extension from starting on 3.x. The runtime guards and recorded app/server versions are described separately in the validation record.
 
 ## Upgrade, rollback and removal
 
-Repeat the build/check/deploy commands. Deployment refuses unmanaged directories, target symlinks and modified managed files, preserving user edits. Reconcile intentional edits before upgrading. Previous managed files and the install marker are backed up under `backups/<timestamp>/`.
+Repeat the build/check/deploy commands. Deployment refuses unmanaged directories, target symlinks and modified managed files, preserving user edits. Reconcile intentional edits before upgrading. Previous managed files and the install marker are backed up under `backups/<timestamp>/`. Deployment can safely upgrade an install carrying the older six-file marker; the new watchdog is included in the current managed file set.
 
-To roll back, close OpenChamber, restore the six managed files and `.chat-mode-install.json` from a selected backup to the same relative paths, then reopen. Keep the location path unchanged to retain history associations. To stop using Chat, disable/remove the extension and remove the project from the sidebar; keep the directory for later reopening. Do not delete the OpenCode database.
+If the only modified managed file is `location/opencode.jsonc`, `npm run deploy -- --preserve-modified-config` explicitly leaves that file byte-for-byte unchanged while updating the other managed files. Its prompts, permissions and policies are therefore not updated; review and merge any needed changes separately. The original marker hash is retained so a later normal deployment will still flag the local edit. Other modified or missing files still prevent deployment.
 
-SDK `engines.openchamber` means a minimum version, not an exact-version lock. Deployment checks OpenChamber 2.4.0; the plugin checks OpenCode 2.0.32. App upgrades require fresh compatibility validation.
+To roll back, close OpenChamber and restore the managed files and `.chat-mode-install.json` from a selected backup to the same relative paths. A backup made before the watchdog was added will not contain `location/.opencode/plugins/chat-watch.js`: first confirm that this file has no user edits, then remove that managed file before restoring the older marker. If it has user edits, preserve and reconcile them before proceeding. Restore only files in the selected backup; do not blindly delete other files or user data. Keep the location path unchanged to retain history associations. To stop using Chat, disable/remove the extension and remove the project from the sidebar; keep the directory for later reopening. Do not delete the OpenCode database.
+
+Compatibility has only been exercised with OpenChamber 2.5.3 / OpenCode 2.2.0, so other 2.x releases still need validation. App upgrades require fresh checks. If the core plugin fails to load, its calculator and tool-filtering hook are unavailable; the watcher reports the condition when its own monitoring path is running.
+
+The watcher is not comprehensive failure monitoring. The SDK cannot guarantee that it can monitor its own failure, the whole OpenCode plugin runtime, the OpenChamber UI, or failure of the extension to start. For details, inspect the plugin status in **OpenChamber Settings → Plugins**.
 
 Uses official [OpenCode plugin](https://dev.opencode.ai/v2/docs/build/plugins/), [policy](https://dev.opencode.ai/v2/docs/policies/), [permission](https://dev.opencode.ai/v2/docs/permissions/) and [OpenChamber SDK](https://docs.openchamber.dev/sdk/) APIs. No upstream fork, app patch, global config edit, search broker or additional MCP server.

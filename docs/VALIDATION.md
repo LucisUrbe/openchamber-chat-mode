@@ -1,8 +1,20 @@
-# Validation — 2026-10-30
+# Validation — 2026-11-11
+
+Target: macOS OpenChamber 2.7.0 and bundled OpenCode 2.2.6. The isolated server uses a local model and callback fixture. The checks exercise both Chat and Build in the Chat Location, retain the default-deny policy, and verify that general code execution, shell, file tools, scheduled tasks, knowledge and image generation remain unavailable.
+
+The fixture registers Web and Memory behind Code Mode, as OpenChamber does. The test verifies that the prompt-time transform makes them directly callable, that their actual tool calls reach the callback, and that a test memory can be saved in one session and read in another. It exercises short action aliases while preserving the native tool's list of allowed actions. Render is also called directly. An ordinary coding Location remains separate.
+
+An additional isolated run used a copy of the OpenChamber 2.7.0 managed plugin for Web, Memory and Render with the local callback fixture and an existing Chat configuration. The Desktop UI displayed the three Chat permissions as allowed. A temporary Desktop session's permission endpoint confirmed those allowances and denials for shell, read, execute, scheduling and image generation; both Chat plugins reported active.
+
+In temporary Desktop sessions using a tool-capable model, a read-only `memory.list`, `render.page`, and browser open, snapshot and close on `https://example.com` returned `ok: true`. An initial unqualified browser action failed schema validation; after adding aliases, live calls using `list`, `open` and `close` returned `ok: true` and resolved to the corresponding native actions. No memory was written in the live check. The sessions were deleted afterwards; the rendered page was not visually inspected in Desktop.
+
+To repeat the isolated test with an installed generated plugin, set `OPENCODE_TEST_MANAGED_PLUGIN` to its directory and run `node scripts/integration.mjs`; `OPENCODE_TEST_CHAT_CONFIG` optionally selects a JSON configuration to test in isolation.
+
+# Historical validation — 2026-10-30
 
 Target: macOS OpenChamber 2.5.3, bundled OpenCode 2.2.0; plugin and SDK dependencies remain pinned in the lockfile.
 
-This is the only OpenChamber/OpenCode pair tested with the current implementation; the older pair below was tested with an earlier implementation. The deployment and server-plugin version gates accept valid semantic versions with major version 2, including prerelease and build metadata, and reject malformed versions or other majors. This policy does not establish that every 2.x release works. `engines.openchamber: 2.0.0` is a minimum-version declaration and does not itself prevent an extension from starting on 3.x.
+This pair was tested with the earlier implementation. The deployment and server-plugin version gates accept valid semantic versions with major version 2, including prerelease and build metadata, and reject malformed versions or other majors. This policy does not establish that every 2.x release works. `engines.openchamber: 2.0.0` is a minimum-version declaration and does not itself prevent an extension from starting on 3.x.
 
 The previous plugin refused to activate on OpenCode 2.2.0 because it required 2.0.32. As a result, its `chat` → `Chat` agent-name transform and calculator registration did not run. In an isolated server using the current bundled binary and a local model fixture, `npm run check` verifies:
 
@@ -13,7 +25,7 @@ The previous plugin refused to activate on OpenCode 2.2.0 because it required 2.
 
 Unit tests also cover expression precedence, invalid or oversized inputs, decimal precision, population versus sample statistics, matrices and integer division. These checks do not make a real account-backed model request or exercise live image understanding.
 
-The same integration test also passed with the existing local `location/opencode.jsonc` as input: it preserved the user's removal of the `websearch` setting while exercising the new plugin and existing permissions in isolation. To repeat this with a JSON-format configuration, set `OPENCODE_TEST_CHAT_CONFIG` to its path; the fixture replaces model/provider settings in the isolated copy and never writes to the original.
+The integration test can also use an existing JSON-format configuration: set `OPENCODE_TEST_CHAT_CONFIG` to its path. The fixture replaces model/provider settings in the isolated copy and never writes to the original.
 
 On the local installation, deployment preserved the modified configuration byte-for-byte and backed up the previous managed files. After the watchdog update, OpenChamber's plugin settings showed both the `chat` plugin package and `chat-watch.js` as loaded, and the visible agent selector showed `Build`, `Chat`, and `Plan`. This Desktop check did not send an account-backed model request.
 
@@ -49,11 +61,9 @@ Target: macOS OpenChamber 2.4.0, bundled OpenCode 2.0.32; matching SDK versions 
 | Attachments | Native TXT/PNG data URIs through real binary | Reached fixture without enabling read |
 | Desktop | Installed configuration and local plugin | Active; no higher-priority authored policy in observed config sources |
 | Live permission API | Ten prohibited actions × Chat/Build | 20 denials |
-| Live model | OpenCode Go DeepSeek V4.1 Flash, high | Calculator, URL fetch, search and primary-source fetch succeeded |
+| Live model | Tool-capable model | Calculator, URL fetch, search and primary-source fetch succeeded |
 | UI | Project, selector, official extension panel | 聊天模式, Chat, current-project state and native history visible |
 | App integrity | codesign --verify --deep --strict | Passed; app bundle untouched |
-
-The first live attempt with `opencode/deepseek-v4.1-flash-free` returned an upstream 403 free-tier restriction. The successful run used the available OpenCode Go provider, without bypassing that restriction.
 
 Tests inspect the real permission endpoint and model request payloads, not refusal prose. Production credentials are not logged. Test server passwords are random and redacted from diagnostics. Private captures/session identifiers are ignored under `.local/`.
 

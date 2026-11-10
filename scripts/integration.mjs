@@ -5,8 +5,8 @@ import { createServer } from 'node:http';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, mkdir, cp, writeFile, readFile } from 'node:fs/promises';
-import { resolve, join } from 'node:path';
+import { mkdtemp, mkdir, cp, writeFile, readFile, stat } from 'node:fs/promises';
+import { resolve, join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { chatConfig, allowedTools, versions, supportedMajors, supportsMajorVersion } from '../dist/lib/policy.js';
 
@@ -15,11 +15,30 @@ const root = await mkdtemp(join(tmpdir(), 'openchamber-chat-test-'));
 const chat = join(root, 'chat'), coding = join(root, 'coding');
 await cp(resolve('dist/location'), chat, { recursive: true });
 await mkdir(coding);
-const requests = [];
+const managedPlugin = process.env.OPENCODE_TEST_MANAGED_PLUGIN;
+const managedDirectory = managedPlugin && ((await stat(managedPlugin)).isDirectory() ? managedPlugin : dirname(managedPlugin));
+const managedSource = managedDirectory ? await readFile(join(managedDirectory, 'index.js'), 'utf8') : '';
+const managedNames = ['openchamber_web', 'openchamber_memory', 'openchamber_render', 'openchamber_schedule', 'openchamber_knowledge', 'openchamber_image'];
+const fixtureNames = managedNames.filter(name => !managedSource.includes(`name: "${name}"`));
+const requests = [], nativeCalls = [], memories = new Map();
 let replyTool;
 const fixture = createServer(async (req, res) => {
   let body = ''; for await (const chunk of req) body += chunk;
-  const input = JSON.parse(body); requests.push(input);
+  const input = JSON.parse(body);
+  if (req.url === '/agent-tool') {
+    if (req.headers.authorization !== 'Bearer local-native-fixture') { res.writeHead(403).end(); return; }
+    nativeCalls.push(input);
+    const requested = input.input.action;
+    const prefix = input.tool === 'openchamber_web' ? 'browser.' : input.tool === 'openchamber_memory' ? 'memory.' : '';
+    const action = prefix && typeof requested === 'string' && !requested.includes('.') ? prefix + requested : requested;
+    let data = { fixture: input.tool };
+    if (action === 'memory.save') memories.set(input.input.title, input.input.body);
+    if (action === 'memory.read') data = { body: memories.get(input.input.title) };
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ schemaVersion: 1, ok: true, action, data }));
+    return;
+  }
+  requests.push(input);
   const tool = replyTool; replyTool = undefined;
   const message = tool ? { role: 'assistant', content: null, tool_calls: [{ id: 'call_test', type: 'function', function: { name: tool.name, arguments: JSON.stringify(tool.args) } }] } : { role: 'assistant', content: 'fixture completed' };
   if (!input.stream) { res.setHeader('content-type','application/json'); res.end(JSON.stringify({ id: 'test', object: 'chat.completion', created: 1, model: 'fixture', choices: [{ index: 0, message, finish_reason: tool ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })); return; }
@@ -37,10 +56,19 @@ const model = {
 const testChatConfig = process.env.OPENCODE_TEST_CHAT_CONFIG
   ? JSON.parse(await readFile(process.env.OPENCODE_TEST_CHAT_CONFIG, 'utf8'))
   : chatConfig();
+const fixturePlugin = join(root, 'native-fixture');
+await mkdir(fixturePlugin);
+await cp(resolve('tests/fixtures/openchamber-managed.mjs'), join(fixturePlugin, 'index.js'));
+await writeFile(join(fixturePlugin, 'package.json'), JSON.stringify({ name:'chat-test-openchamber-managed', version:'0.0.0', type:'module', main:'./index.js' }));
+const managedCopy = join(root, 'installed-managed');
+if (managedDirectory) await cp(managedDirectory, managedCopy, { recursive:true });
+const plugins = [...(managedDirectory ? [managedCopy] : []), fixturePlugin];
+await mkdir(join(root, 'config', 'opencode'), { recursive:true });
+await writeFile(join(root, 'config', 'opencode', 'opencode.json'), JSON.stringify({ plugins }));
 await writeFile(join(chat, 'opencode.jsonc'), JSON.stringify({ ...testChatConfig, ...model }));
 await writeFile(join(coding, 'opencode.jsonc'), JSON.stringify(model));
 const password = randomBytes(24).toString('hex');
-const env = { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, XDG_DATA_HOME: join(root,'data'), XDG_CONFIG_HOME: join(root,'config'), XDG_CACHE_HOME: join(root,'cache'), XDG_STATE_HOME: join(root,'state'), OPENCODE_SERVER_PASSWORD: password };
+const env = { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, XDG_DATA_HOME: join(root,'data'), XDG_CONFIG_HOME: join(root,'config'), XDG_CACHE_HOME: join(root,'cache'), XDG_STATE_HOME: join(root,'state'), OPENCODE_SERVER_PASSWORD: password, OPENCHAMBER_AGENT_TOOL_URL: `http://127.0.0.1:${fixture.address().port}/agent-tool`, OPENCHAMBER_AGENT_TOOL_TOKEN: 'local-native-fixture', CHAT_TEST_FIXTURE_NATIVE_TOOLS: JSON.stringify(fixtureNames) };
 const binaryVersionOutput = execFileSync(binary, ['--version'], { cwd: root, env, encoding: 'utf8' }).trim();
 const binaryVersion = binaryVersionOutput.match(/^opencode v(\S+)$/)?.[1];
 assert.ok(supportsMajorVersion(binaryVersion, supportedMajors.opencode), `Unsupported or unrecognized OpenCode version: ${binaryVersionOutput}`);
@@ -101,7 +129,7 @@ try {
     await api(`/api/session/${session.id}/agent`, { agent });
     // A permissive session override must not weaken the Location policy.
     if (agent === 'build') await api(`/api/session/${session.id}`, { permissions:[{action:'*',resource:'*',effect:'allow'}] }, 'PATCH');
-    for (const action of ['read','edit','write','patch','glob','grep','shell','subagent','skill','execute','browser','future_plugin_tool']) {
+    for (const action of ['read','edit','write','patch','glob','grep','shell','subagent','skill','execute','browser','openchamber','openchamber_schedule','openchamber_knowledge','openchamber_image','future_plugin_tool']) {
       const check = await api(`/api/session/${session.id}/permission`, { action, resources: ['*'] });
       assert.equal(check.data.effect, 'deny', `${agent}: ${action}`);
     }
@@ -134,6 +162,26 @@ try {
     const captured = await prompt(session.id, `Exercise calculator operation ${args.operation}.`);
     assert.deepEqual(lastToolResponse(captured).result, expected, `${args.operation} result returns to model`);
   }
+  replyTool = { name:'openchamber_web', args:{ action:'browser.snapshot', parameters:{} } };
+  const web = await prompt(session.id, 'Inspect the browser page.');
+  assert.equal(lastToolResponse(web).action, 'browser.snapshot');
+  assert.equal(nativeCalls.at(-1).tool, 'openchamber_web');
+  replyTool = { name:'openchamber_web', args:{ action:'open', parameters:{ url:'https://example.com' } } };
+  const webAlias = await prompt(session.id, 'Open a test page with the short action name.');
+  assert.equal(lastToolResponse(webAlias).action, 'browser.open');
+  assert.equal(nativeCalls.at(-1).input.action, 'open', 'short action reaches the managed tool');
+  replyTool = { name:'openchamber_render', args:{ action:'render.page', parameters:{ title:'Fixture', html:'<p>Fixture</p>' } } };
+  const rendered = await prompt(session.id, 'Show an interactive illustration.');
+  assert.equal(lastToolResponse(rendered).action, 'render.page');
+  assert.equal(nativeCalls.at(-1).tool, 'openchamber_render');
+  replyTool = { name:'openchamber_memory', args:{ action:'memory.save', parameters:{ title:'Fixture preference', body:'fixture value', scope:'project' } } };
+  const saved = await prompt(session.id, 'Remember the fixture preference.');
+  assert.equal(lastToolResponse(saved).action, 'memory.save');
+  const followup = (await api('/api/session', { location:{ directory:chat }, title:'Memory follow-up', agent:'chat' })).data;
+  replyTool = { name:'openchamber_memory', args:{ action:'read', parameters:{ title:'Fixture preference', scope:'project' } } };
+  const recalled = await prompt(followup.id, 'Read the fixture preference.');
+  assert.equal(lastToolResponse(recalled).data.body, 'fixture value');
+  assert.notEqual(nativeCalls.at(-1).sessionID, nativeCalls.at(-2).sessionID, 'memory requests come from different sessions');
   const attachment = await prompt(session.id, 'Read only my explicit attachment.', [{ uri:'data:text/plain;base64,' + Buffer.from('explicit attachment marker 42817').toString('base64'), name:'input.txt' }]);
   assert.ok(attachment.some(r=>JSON.stringify(r.messages).includes('explicit attachment marker 42817')), 'text attachment reaches model without read permission');
   const image = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==';
@@ -154,13 +202,16 @@ try {
   assert.equal(permitted.data.effect,'allow');
   const control = await prompt(other.id, 'Say hello.');
   assert.ok(control.some(r => r.tools?.some(t => !allowedTools.includes(t.function.name))), 'coding tools unaffected');
+  const codingTools = control.find(r => r.tools?.length).tools.map(t => t.function.name);
+  assert.ok(codingTools.includes('execute'), 'coding location retains Code Mode');
+  assert.ok(!codingTools.includes('openchamber_web') && !codingTools.includes('openchamber_memory'), 'Chat direct-tool transform stays in its location');
   const report = {
     passed: true,
     versions: {
       opencode: { actual:binaryVersion, baseline:versions.opencode, matchesBaseline:binaryVersion === versions.opencode },
       openchamber: { installed:appVersion ?? null, baseline:versions.openchamber, matchesBaseline:appVersion === versions.openchamber },
     },
-    checks: ['local plugin active', 'configured default Chat agent and display name', 'Chat and Build negative permissions', 'native web permissions', 'captured model tool allowlist and calculator schema for Chat and Build', 'actual arithmetic, expression, statistics, matrix and bigint tool execution', 'explicit text and image attachments', 'forced unadvertised shell call rejected; sentinel unchanged', 'ordinary coding location unaffected'], realLLM: false, externalSearch: false,
+    checks: ['local plugin active', 'configured default Chat agent and display name', 'Chat and Build negative permissions', 'captured model tool allowlist and calculator schema for Chat and Build', 'native browser, render and cross-session memory calls through a local callback fixture', 'actual arithmetic, expression, statistics, matrix and bigint tool execution', 'explicit text and image attachments', 'forced unadvertised shell call rejected; sentinel unchanged', 'ordinary coding location unaffected'], managedPlugin: managedPlugin ? 'installed native plugin plus stand-ins for missing tools' : 'stand-ins', fixtureNames, realLLM: false, externalSearch: false,
   };
   await mkdir('.local/validation', { recursive:true });
   await writeFile('.local/validation/integration.json', JSON.stringify(report,null,2)+'\n');

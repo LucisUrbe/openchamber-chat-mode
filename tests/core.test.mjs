@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { calculate } from '../dist/lib/calculator.js';
-import { chatConfig, trimTools, allowedTools } from '../dist/lib/policy.js';
+import { chatConfig, trimTools, allowedTools, nativeActionAliases } from '../dist/lib/policy.js';
 import { readFile, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,6 +22,15 @@ test('new tools are hidden by default; policy and agent allowlists agree', () =>
   const config=chatConfig();
   assert.deepEqual(config.agents.chat.permissions.slice(1).map(r=>r.action),[...allowedTools]);
   assert.deepEqual(config.policies.slice(1).map(r=>r.resource),allowedTools.map(n=>n+':*'));
+});
+test('native action aliases preserve the original schema and only expose known actions', () => {
+  const schema={type:'object',properties:{action:{type:'string',oneOf:[{const:'browser.open'},{const:'browser.snapshot'},{const:'other.action'}]}}};
+  const amended=nativeActionAliases('openchamber_web',schema);
+  assert.deepEqual(amended.properties.action.oneOf.map(x=>x.const), ['browser.open','browser.snapshot','other.action','open','snapshot']);
+  assert.equal(schema.properties.action.oneOf.length,3);
+  assert.equal(nativeActionAliases('openchamber_web',amended),amended);
+  assert.equal(nativeActionAliases('openchamber_memory',schema),schema);
+  assert.equal(nativeActionAliases('openchamber_web',null),null);
 });
 test('extension requests sessions only and matches the installed SDK', async () => {
   const manifest=JSON.parse(await readFile('dist/extension/package.json','utf8'));

@@ -10,7 +10,7 @@ test('only valid major-version 2 releases are accepted, including prerelease and
   for (const version of ['1.99.99', '3.0.0', '20.1.1', '02.0.0', '2.01.0', '2.0.01', '2.0', '2', 'v2.0.0', '2.0.0-beta.01', '2.0.0+', '2.0.0-foo..bar', '2.0.0 garbage', '', null, 2]) {
     assert.equal(supportsMajorVersion(version, 2), false, String(version));
   }
-  assert.deepEqual(versions, { openchamber: '2.5.3', opencode: '2.2.0' });
-  assert.notEqual('2.2.0-beta.1', versions.opencode);
-  assert.notEqual('2.2.0+custom', versions.opencode);
+  assert.deepEqual(versions, { openchamber: '2.7.0', opencode: '2.2.6' });
+  assert.notEqual('2.2.6-beta.1', versions.opencode);
+  assert.notEqual('2.2.6+custom', versions.opencode);
 });

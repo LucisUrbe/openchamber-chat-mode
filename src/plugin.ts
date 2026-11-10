@@ -2,7 +2,7 @@ import { Plugin } from '@opencode/plugin';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { sep } from 'node:path';
-import { allowedTools, supportedMajors, supportsMajorVersion, trimTools } from './policy.js';
+import { allowedTools, nativeActionAliases, supportedMajors, supportsMajorVersion, trimTools } from './policy.js';
 import { calculate, type Calculation } from './calculator.js';
 
 export default Plugin.define({
@@ -17,6 +17,7 @@ export default Plugin.define({
       // Native tools must remain directly callable when Code Mode is unavailable.
       for (const name of allowedTools) editor.update(name, tool => {
         tool.options = { namespace: tool.options?.namespace, permission: tool.options?.permission, codemode: false };
+        tool.input = nativeActionAliases(name, tool.input) as typeof tool.input;
       });
       editor.add({
         name: 'chat_calculate',
@@ -49,6 +50,26 @@ export default Plugin.define({
           return { content: JSON.stringify(calculate(input as Calculation)) };
         },
       });
+    });
+    // Managed OpenChamber plugins can register after this Location plugin. A
+    // late transform makes their Code Mode tools direct without enabling the
+    // general-purpose execute tool. Re-register if a later reload changes them.
+    const managedDirect = ['openchamber_web', 'openchamber_memory'];
+    let directTransform: { dispose(): Promise<void> } | undefined;
+    let pending = Promise.resolve();
+    await ctx.session.hook('prompt', () => {
+      pending = pending.catch(() => {}).then(async () => {
+        const tools = await ctx.tool.list();
+        if (!tools.some(tool => managedDirect.includes(tool.id) && (tool.options?.codemode !== false || nativeActionAliases(tool.id, tool.input) !== tool.input))) return;
+        await directTransform?.dispose();
+        directTransform = await ctx.tool.transform(editor => {
+          for (const name of managedDirect) editor.update(name, tool => {
+            tool.options = { namespace: tool.options?.namespace, permission: tool.options?.permission, codemode: false };
+            tool.input = nativeActionAliases(name, tool.input) as typeof tool.input;
+          });
+        });
+      });
+      return pending;
     });
     await ctx.session.hook('context', event => trimTools(event.tools));
     await ctx.session.hook('generate', event => trimTools(event.tools));

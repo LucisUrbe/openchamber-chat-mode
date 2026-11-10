@@ -7,7 +7,7 @@ const select = $('project') as HTMLSelectElement;
 const style = document.createElement('style'); style.textContent = GUEST_UI_LOOK_CSS; document.head.append(style);
 let projects: GuestProject[] = [], selected = '', directory: string | null = null, session: SessionSnapshot | null = null;
 let unsubscribe: (() => void) | undefined, revision = 0;
-const history = mountList($('history'), { items: [], emptyText: '选择聊天项目后显示原生会话历史', onSelect: id => { void host.openSession(id).catch(fail); } });
+const history = mountList($('history'), { items: [], ariaLabel: '聊天历史', emptyText: '选择聊天项目后显示原生会话历史', onSelect: id => { void host.openSession(id).catch(fail); } });
 function fail(error: unknown) { $('error').textContent = error instanceof Error ? error.message : String(error); }
 function status() {
   const project = projects.find(p => p.id === selected);

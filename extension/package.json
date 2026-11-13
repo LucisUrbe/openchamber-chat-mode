@@ -14,6 +14,11 @@
       },
       "capabilities": [
         "sessions"
+      ],
+      "tools": [
+        { "match": "websearch", "name": "Web Search" },
+        { "match": "webfetch", "name": "Fetch URL" },
+        { "match": "chat_calculate", "name": "Chat Calculate" }
       ]
     },
     "engines": {

@@ -34,6 +34,8 @@ backups/                         # previous managed files on upgrades
 2. Settings → Extensions: install the deployed `extension` folder and approve **sessions only**.
 3. Open the Chat panel and bind the deployed project. The choice persists in `host.storage`.
 4. Select that project, use native **New session**, confirm **Chat**, and select a working model.
+
+The extension also names the `websearch`, `webfetch` and `chat_calculate` tool calls in the chat. OpenChamber accepts only one fixed name per tool, so deployment writes the names for the `locale` in `~/.config/openchamber/settings.json`: Simplified Chinese (联网搜索, 获取网页, 数值计算), Traditional Chinese, or English (Web Search, Fetch URL, Chat Calculate) otherwise. Override it with `npm run deploy -- --locale zh-CN`. After changing the OpenChamber language, deploy again and reload the extension. While the extension is enabled, these names apply in every project.
 5. In Settings → General → OpenChamber Tools, enable **Agent memory tool** and check that **OpenChamber Web tool** and **Agent render tool** are enabled. These tools require the OpenCode server managed by OpenChamber.
 
 OpenCode's `default_agent` supplies the default. OpenChamber may retain an earlier choice; set the project's default agent to `chat` if needed. Build and Plan remain subject to the Chat Location policy.

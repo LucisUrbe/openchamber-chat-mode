@@ -34,6 +34,8 @@ backups/                         # 更新时备份原有托管文件
 2. 设置 → 扩展，从上述 `extension` 文件夹安装，只批准会话权限。
 3. 打开“聊天模式”面板，绑定已部署项目；选择使用 `host.storage` 持久化。
 4. 进入该项目，通过原生“新建会话”创建聊天，确认 Agent 为 **Chat**，选择可用模型。
+
+扩展还会为聊天中的 `websearch`、`webfetch` 和 `chat_calculate` 工具调用命名。OpenChamber 每个工具只接受一个固定名称，因此部署时按 `~/.config/openchamber/settings.json` 中的 `locale` 写入：简体中文（联网搜索、获取网页、数值计算）、繁体中文，其余语言使用英文（Web Search、Fetch URL、Chat Calculate）。可用 `npm run deploy -- --locale zh-CN` 指定。切换 OpenChamber 语言后需重新部署并重新加载扩展。扩展启用期间，这些名称在所有项目中生效。
 5. 在设置 → 通用 → OpenChamber 工具中启用 **智能体记忆工具**；检查 **OpenChamber Web 工具**和**智能体展示工具**也已启用。原生工具由 OpenChamber 自己管理的 OpenCode 服务提供，外部 OpenCode 服务不能提供这些工具。
 
 `default_agent` 提供默认值；OpenChamber 可能记住上次选择，必要时将项目默认智能体设为 `chat`。即使选择 Build 或 Plan，聊天目录策略仍禁止非聊天动作。

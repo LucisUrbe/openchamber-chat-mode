@@ -126,10 +126,34 @@ test('preservation requires a valid managed marker and rejects symlinked paths',
 });
 
 test('deployment arguments select only the explicit config-preservation option', () => {
-  assert.deepEqual(parseDeployArgs([], '/test-home'), { target: '/test-home/.local/share/openchamber-chat', preserveModifiedConfig: false });
-  assert.deepEqual(parseDeployArgs(['--preserve-modified-config', '/test-target'], '/test-home'), { target: '/test-target', preserveModifiedConfig: true });
+  assert.deepEqual(parseDeployArgs([], '/test-home'), { target: '/test-home/.local/share/openchamber-chat', preserveModifiedConfig: false, locale: 'en' });
+  assert.deepEqual(parseDeployArgs(['--preserve-modified-config', '/test-target'], '/test-home'), { target: '/test-target', preserveModifiedConfig: true, locale: 'en' });
   assert.throws(() => parseDeployArgs(['--unknown']), /Unknown deployment option/);
   assert.throws(() => parseDeployArgs(['/first', '/second']), /at most one/);
+});
+
+test('deployment locale comes from --locale, then OpenChamber settings, then English', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'chat-locale-home-'));
+  assert.equal(parseDeployArgs(['--locale', 'zh-TW'], home).locale, 'zh-TW');
+  assert.equal(parseDeployArgs(['--locale=zh-CN', '/t'], home).locale, 'zh-CN');
+  assert.throws(() => parseDeployArgs(['--locale'], home), /language tag/);
+  assert.throws(() => parseDeployArgs(['--locale', '--preserve-modified-config'], home), /language tag/);
+  assert.throws(() => parseDeployArgs(['--locale=en', '--locale=fr'], home), /at most one locale/);
+  await mkdir(join(home, '.config/openchamber'), { recursive: true });
+  await writeFile(join(home, '.config/openchamber/settings.json'), '{ not json');
+  assert.equal(parseDeployArgs([], home).locale, 'en');
+  await writeFile(join(home, '.config/openchamber/settings.json'), JSON.stringify({ locale: 'zh-CN' }));
+  assert.equal(parseDeployArgs([], home).locale, 'zh-CN');
+  assert.equal(parseDeployArgs(['--locale=en'], home).locale, 'en');
+});
+
+test('deployment writes tool names for the requested locale and redeploys another', async () => {
+  const target = join(await mkdtemp(join(tmpdir(), 'chat-locale-')), 'installed');
+  const names = async () => Object.fromEntries(JSON.parse(await readFile(join(target, 'extension/package.json'), 'utf8')).openchamber.contributes.tools.map(t => [t.match, t.name]));
+  assert.equal((await deploy(target, resolve('dist'), { locale: 'zh-CN' })).toolLabels, 'zh-Hans');
+  assert.deepEqual(await names(), { websearch: '联网搜索', webfetch: '获取网页', chat_calculate: '数值计算' });
+  await deploy(target, resolve('dist'), { locale: 'en-GB' });
+  assert.deepEqual(await names(), { websearch: 'Web Search', webfetch: 'Fetch URL', chat_calculate: 'Chat Calculate' });
 });
 
 test('legacy installation upgrades safely and retains its edited config and original backup', async () => {
